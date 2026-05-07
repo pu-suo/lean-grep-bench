@@ -1,0 +1,4 @@
+# Installed inside the venv on the EC2 trace box (separate from the Mac venv).
+# The remaining deps (typer, pydantic) come from the parent repo's
+# `pip install -e ".[dojo]"`.
+lean-dojo

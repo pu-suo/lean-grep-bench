@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "leangrep-bench"
+version = "0.0.0"
+description = "Benchmark of (query, ground-truth lemma) pairs for evaluating Lean 4 retrieval systems."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Tom" }]
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.6",
+    "openai>=1.50",
+    "python-dotenv>=1.0",
+    "rank-bm25>=0.2.2",
+    "numpy>=1.26",
+    "sentence-transformers>=3.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+]
+# Installed only on the Linux trace box. Never imported by the in-package code;
+# see specs/phase_08_remote_runbook.md.
+dojo = [
+    "lean-dojo",
+]
+
+[project.scripts]
+leangrep-bench = "leangrep_bench.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/leangrep_bench"]
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/leangrep_bench/cli.py" = ["B008"]
+"src/leangrep_bench/dojo/cli.py" = ["B008"]
+"tests/**" = ["RUF001"]
+# This test fixture has a long Lean signature line that's awkward to break.
+"tests/test_convert_benchmark.py" = ["RUF001", "E501"]
+# Operator-side scripts: no line-length policing on embedded CSS/HTML.
+"scripts/**" = ["E501"]
+
+[tool.pyright]
+include = ["src"]
+strict = ["src"]
+pythonVersion = "3.11"
+# rank_bm25 and sentence_transformers ship without type stubs.
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
