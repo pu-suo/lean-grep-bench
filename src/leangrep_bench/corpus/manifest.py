@@ -7,7 +7,40 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 logger = logging.getLogger(__name__)
+
+
+class ProjectEntry(BaseModel):
+    project_name: str
+    project_repo_url: str
+    project_sha: str
+    mathlib_sha: str
+    lean_toolchain: str
+    license: str
+    decl_count: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BuildManifestV2(BaseModel):
+    schema_version: str
+    built_at: str
+    projects: list[ProjectEntry]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def read_manifest_v2(path: Path) -> BuildManifestV2:
+    """Load and validate a v2 build manifest."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    manifest = BuildManifestV2.model_validate(data)
+    if manifest.schema_version != "v2":
+        raise ValueError(
+            f"expected schema_version='v2', got {manifest.schema_version!r}"
+        )
+    return manifest
 
 
 def _git(args: list[str], cwd: Path) -> str:

@@ -1,0 +1,13 @@
+{
+  "built_at": "2026-05-07T06:09:58+00:00",
+  "pfr": {
+    "path": "/Users/Tom/Documents/Project Documents/Lean_Proving/pfr",
+    "git_sha": "80daaf135131403686badd2553dc9b2ca3aabdf8",
+    "dirty": false
+  },
+  "mathlib": {
+    "path": "/Users/Tom/Documents/Project Documents/Lean_Proving/mathlib4",
+    "git_sha": "35638f90bcb53a4795506939d39dc5b73f1ac108",
+    "dirty": false
+  }
+}

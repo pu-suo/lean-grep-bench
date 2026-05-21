@@ -35,9 +35,26 @@ logger = logging.getLogger(__name__)
 
 _KS: tuple[int, ...] = (1, 5, 10)
 
+# When the visibility filter is active, the runner asks adapters for
+# k * _VISIBILITY_OVERSAMPLE candidates and post-filters to those visible
+# under the item's (project, mathlib_sha) context, then truncates to k.
+# Tuned for PFR-only: there the filter is a no-op so any value works.
+# Multi-project (Phase 15+) will validate the chosen factor against the
+# Option-B vs Option-C cross-check.
+_VISIBILITY_OVERSAMPLE: int = 5
+
 
 def _load_corpus(corpus_dir: Path) -> list[NormalizedDeclaration]:
+    """Load the corpus. Prefers ``corpus_dir/v2/*.jsonl`` (the v2 union
+    layout); falls back to the legacy two-file layout if v2/ is absent.
+    """
     out: list[NormalizedDeclaration] = []
+    v2_dir = corpus_dir / "v2"
+    if v2_dir.is_dir():
+        for p in sorted(v2_dir.glob("*.jsonl")):
+            for d in read_corpus(p):
+                out.append(d)
+        return out
     for fname in ("mathlib_declarations.jsonl", "pfr_declarations.jsonl"):
         p = corpus_dir / fname
         if not p.exists():
@@ -45,6 +62,21 @@ def _load_corpus(corpus_dir: Path) -> list[NormalizedDeclaration]:
         for d in read_corpus(p):
             out.append(d)
     return out
+
+
+def _build_visibility_index(
+    corpus: list[NormalizedDeclaration],
+) -> dict[tuple[str, str], frozenset[str]]:
+    """Map each ``(project, mathlib_sha)`` context to the frozen set of
+    fully-qualified declaration names visible under it. Empty dict if no
+    declaration carries a ``visible_in`` tag (legacy v1 corpus)."""
+    accum: dict[tuple[str, str], set[str]] = {}
+    for d in corpus:
+        for ctx in d.visible_in:
+            # pydantic deserializes JSON arrays into tuples for our annotation.
+            project, sha = ctx[0], ctx[1]
+            accum.setdefault((project, sha), set()).add(d.qualified_name)
+    return {k: frozenset(v) for k, v in accum.items()}
 
 
 def _existing_predictions(
@@ -64,9 +96,15 @@ def _run_adapter(
     existing: dict[tuple[str, str], Prediction],
     k: int,
     out_file: IO[str],
+    visibility_index: dict[tuple[str, str], frozenset[str]] | None = None,
 ) -> int:
     """Index the adapter, run predictions for items not already cached, append
     each new prediction to ``out_file`` immediately, return # new predictions.
+
+    If ``visibility_index`` is supplied and the item carries a (project,
+    mathlib_sha) context, the adapter is queried for ``k * _VISIBILITY_OVERSAMPLE``
+    candidates and the result list is filtered to those whose qualified name
+    is visible under the item's context, then truncated to k.
     """
     needed = [it for it in items if (adapter.name, it.id) not in existing]
     if not needed:
@@ -82,7 +120,16 @@ def _run_adapter(
 
     written = 0
     for i, item in enumerate(needed, 1):
-        results = adapter.search(item.query, context=item.context, k=k)
+        ctx_key = _item_context_key(item)
+        if visibility_index and ctx_key is not None and ctx_key in visibility_index:
+            visible = visibility_index[ctx_key]
+            raw = adapter.search(
+                item.query, context=item.context, k=k * _VISIBILITY_OVERSAMPLE
+            )
+            filtered = [r for r in raw if r.name in visible][:k]
+            results = filtered
+        else:
+            results = adapter.search(item.query, context=item.context, k=k)
         pred = Prediction(
             adapter=adapter.name,
             item_id=item.id,
@@ -98,6 +145,12 @@ def _run_adapter(
         if i % 50 == 0:
             logger.info("%s: %d/%d", adapter.name, i, len(needed))
     return written
+
+
+def _item_context_key(item: BenchmarkItem) -> tuple[str, str] | None:
+    if item.project is None or item.mathlib_sha is None:
+        return None
+    return (item.project, item.mathlib_sha)
 
 
 def _slice_metrics(
@@ -125,6 +178,12 @@ def run_eval(
     corpus = _load_corpus(corpus_dir)
     if not corpus:
         raise RuntimeError(f"no corpus in {corpus_dir}")
+    visibility_index = _build_visibility_index(corpus)
+    if visibility_index:
+        logger.info(
+            "visibility index covers %d (project, mathlib_sha) contexts",
+            len(visibility_index),
+        )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     predictions_path = out_dir / "predictions.jsonl"
@@ -161,6 +220,7 @@ def run_eval(
                     existing=existing,
                     k=k,
                     out_file=out_file,
+                    visibility_index=visibility_index or None,
                 )
             except AdapterUnavailable as e:
                 unavailable[name] = str(e)

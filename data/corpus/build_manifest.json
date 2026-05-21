@@ -1,13 +1,15 @@
 {
-  "built_at": "2026-05-07T06:09:58+00:00",
-  "pfr": {
-    "path": "/Users/Tom/Documents/Project Documents/Lean_Proving/pfr",
-    "git_sha": "80daaf135131403686badd2553dc9b2ca3aabdf8",
-    "dirty": false
-  },
-  "mathlib": {
-    "path": "/Users/Tom/Documents/Project Documents/Lean_Proving/mathlib4",
-    "git_sha": "35638f90bcb53a4795506939d39dc5b73f1ac108",
-    "dirty": false
-  }
+  "schema_version": "v2",
+  "built_at": "2026-05-19T00:00:00+00:00",
+  "projects": [
+    {
+      "project_name": "pfr",
+      "project_repo_url": "https://github.com/teorth/pfr",
+      "project_sha": "80daaf135131403686badd2553dc9b2ca3aabdf8",
+      "mathlib_sha": "35638f90bcb53a4795506939d39dc5b73f1ac108",
+      "lean_toolchain": "leanprover/lean4:v4.28.0-rc1",
+      "license": "Apache-2.0",
+      "decl_count": 1077
+    }
+  ]
 }

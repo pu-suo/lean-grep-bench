@@ -8,6 +8,7 @@ from leangrep_bench.adapters.registry import list_adapters
 from leangrep_bench.corpus.build import build_corpus
 from leangrep_bench.corpus.manifest import write_manifest
 from leangrep_bench.corpus.stats import compute_stats, format_stats
+from leangrep_bench.corpus.union import build_union_corpus
 from leangrep_bench.dojo.cli import dojo_app
 from leangrep_bench.eval.runner import run_eval
 from leangrep_bench.eval.sanity import render_table, run_sanity_check
@@ -90,6 +91,34 @@ def corpus_build_pfr(
     typer.echo(f"wrote {n:,} declarations to {out}")
     write_manifest(manifest, mathlib_path=None, pfr_path=pfr_path)
     typer.echo(f"updated manifest: {manifest}")
+
+
+@corpus_app.command("build-union")
+def corpus_build_union(
+    manifest: Path = typer.Option(
+        Path("data/corpus/build_manifest.json"),
+        "--manifest",
+        help="v2 build manifest listing projects with visibility info.",
+    ),
+    legacy_corpus_dir: Path = typer.Option(
+        Path("data/corpus"),
+        "--legacy-corpus-dir",
+        help="Directory holding the per-source JSONLs (mathlib + project).",
+    ),
+    out_dir: Path = typer.Option(
+        Path("data/corpus/v2"),
+        "--out-dir",
+        help="Where to write the union corpus.",
+    ),
+) -> None:
+    """Build the union corpus with per-decl visible_in tags from the v2 manifest."""
+    counts = build_union_corpus(
+        manifest_path=manifest,
+        legacy_corpus_dir=legacy_corpus_dir,
+        out_dir=out_dir,
+    )
+    for fname, n in counts.items():
+        typer.echo(f"{fname}: {n:,} declarations")
 
 
 @corpus_app.command("stats")

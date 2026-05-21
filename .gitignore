@@ -23,8 +23,15 @@ coverage.xml
 
 specs/
 .cache/
-data/corpus/mathlib_declarations.jsonl
-data/dojo_trace/
 
-.cache/
+# Mathlib corpus exports — generated, large (>100 MB), regenerable from
+# the local Mathlib checkout via `leangrep-bench corpus build-mathlib`
+# and `corpus build-union`. The PFR / project-local JSONLs are small
+# and stay tracked.
 data/corpus/mathlib_declarations.jsonl
+data/corpus/v2/mathlib__*.jsonl
+
+# LeanDojo trace artifacts — multi-GB, captured on the EC2 trace box and
+# rsynced down. Per-project subdir per the v2 runbook.
+data/dojo_trace/
+data/dojo_trace_*/

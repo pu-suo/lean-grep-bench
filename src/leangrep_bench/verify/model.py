@@ -46,6 +46,11 @@ class BenchmarkItem(BaseModel):
     context: BenchmarkContext
     provenance: Provenance
     generation: GenerationMeta
+    # v2 corpus-context fields. The eval runner uses these to apply the
+    # visibility filter over the union corpus. Optional on read so v1
+    # benchmark.jsonl files still parse; the v2 regen step populates them.
+    project: str | None = None
+    mathlib_sha: str | None = None
 
     model_config = ConfigDict(extra="ignore")
 
