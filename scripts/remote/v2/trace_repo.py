@@ -500,5 +500,24 @@ def main() -> None:
     )
 
 
+def _run_with_deep_stack() -> None:
+    """LeanDojo-v2's AST parser (``ast.py``) is recursive-descent and overflows
+    Python's default 1000-frame limit on deeply-nested syntax trees — e.g.
+    PNT's ``LeanCert`` interval-arithmetic terms. Raise the recursion limit and
+    run on a thread with a large C stack so we parse them instead of crashing
+    with RecursionError (or segfaulting on a too-small stack).
+    """
+    import threading
+
+    sys.setrecursionlimit(500_000)
+    try:
+        threading.stack_size(1024 * 1024 * 1024)  # 1 GB
+    except (ValueError, OverflowError):
+        threading.stack_size(256 * 1024 * 1024)  # fallback 256 MB
+    t = threading.Thread(target=main)
+    t.start()
+    t.join()
+
+
 if __name__ == "__main__":
-    main()
+    _run_with_deep_stack()
