@@ -32,6 +32,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -305,6 +306,30 @@ def _premises_from_tactic(tac: Any) -> list[Premise]:
     return out
 
 
+_ANNOTATION_RE = re.compile(r"<a>(.*?)</a>", re.DOTALL)
+
+
+def _premises_from_annotated(annotated_tactic: str) -> list[Premise]:
+    """Build the premise list from the ``<a>...</a>`` tags in the annotated
+    tactic.
+
+    LeanDojo-v2 stores premises at the *file* level (PremiseTrace), not on the
+    per-tactic object, so ``_premises_from_tactic`` comes back empty. But the
+    annotated tactic wraps each resolved premise in ``<a>FULL_NAME</a>`` with
+    its fully-qualified name — exactly what the head-premise matcher in
+    ``extract/head_premise.py`` needs. Parse them out, dedup, preserve order.
+    """
+    out: list[Premise] = []
+    seen: set[str] = set()
+    for m in _ANNOTATION_RE.finditer(annotated_tactic):
+        name = m.group(1).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(Premise(full_name=name))
+    return out
+
+
 def _to_trace(
     *,
     file_path: str,
@@ -338,6 +363,13 @@ def _to_trace(
     column_start = _coord(start, "column_nb", _coord(start, "column", 0))
     column_end = _coord(end, "column_nb", _coord(end, "column", column_start))
 
+    annotated = _annotated_tactic(tac)
+    # LeanDojo-v2 doesn't expose premises per-tactic; recover them from the
+    # annotated tactic's <a> tags so the head-premise matcher can resolve.
+    premises = _premises_from_tactic(tac)
+    if not premises:
+        premises = _premises_from_annotated(annotated)
+
     return TacticTrace(
         file=file_path,
         enclosing_decl=enclosing_decl,
@@ -348,10 +380,10 @@ def _to_trace(
         column_start=column_start,
         column_end=column_end,
         tactic=_tactic_text(tac, traced_theorem),
-        annotated_tactic=_annotated_tactic(tac),
+        annotated_tactic=annotated,
         state_before_pp=_state_before(tac),
         state_after_pp=_state_after(tac),
-        premises=_premises_from_tactic(tac),
+        premises=premises,
         trace_index=trace_index,
     )
 
