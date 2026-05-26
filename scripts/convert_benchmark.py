@@ -1,43 +1,36 @@
-"""Convert data/benchmark.jsonl into a human-viewable CSV or HTML file."""
+"""Convert data/benchmark.jsonl into a human-viewable CSV or HTML file.
+
+CSV output is the same shape the ``leangrep-bench benchmark export-csv``
+CLI produces — both share the column list and flatten logic in
+``leangrep_bench.benchmark_export``. HTML output is a self-contained
+single-file viewer with a scenario filter; it stays here because it's
+only ever invoked from this script.
+"""
 
 from __future__ import annotations
 
 import argparse
-import csv
 import html
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-COLUMNS: list[str] = [
-    "id",
-    "scenario",
-    "query",
-    "ground_truth_name",
-    "ground_truth_source",
-    "context.enclosing_decl",
-    "context.enclosing_signature",
-    "context.goal",
-    "context.hypotheses",
-    "context.prior_tactics",
-    "provenance.source_file",
-    "provenance.line",
-    "provenance.tactic_kind",
-    "generation.generator_model",
-    "generation.verifier_model",
-    "generation.seed",
-]
+# Make the source tree importable when this script is run directly.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-LIST_JOIN = " | "
-DEFAULT_MAX_LEN = 500
-SCENARIO_COLORS = {
-    "local_only": "#dbeafe",
-    "mathlib_only": "#dcfce7",
-    "mixed": "#fef3c7",
-}
+from leangrep_bench.benchmark_export import (  # noqa: E402
+    COLUMNS,
+    DEFAULT_MAX_LEN,
+    load_items,
+    write_csv,
+)
 
 
-def load_items(path: Path) -> list[dict[str, Any]]:
+def load_items_raw(path: Path) -> list[dict[str, Any]]:
+    """Load benchmark rows as raw dicts (for the HTML viewer)."""
     items: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as f:
         for line in f:
@@ -47,51 +40,11 @@ def load_items(path: Path) -> list[dict[str, Any]]:
             items.append(json.loads(line))
     return items
 
-
-def _truncate(s: str, max_len: int | None) -> str:
-    if max_len is None or len(s) <= max_len:
-        return s
-    return s[: max_len - 1] + "…"
-
-
-def flatten_for_csv(item: dict[str, Any], max_len: int | None) -> list[str]:
-    ctx = item.get("context") or {}
-    prov = item.get("provenance") or {}
-    gen = item.get("generation") or {}
-
-    def cell(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, list):
-            return _truncate(LIST_JOIN.join(str(v) for v in value), max_len)
-        return _truncate(str(value), max_len)
-
-    return [
-        cell(item.get("id")),
-        cell(item.get("scenario")),
-        cell(item.get("query")),
-        cell(item.get("ground_truth_name")),
-        cell(item.get("ground_truth_source")),
-        cell(ctx.get("enclosing_decl")),
-        cell(ctx.get("enclosing_signature")),
-        cell(ctx.get("goal")),
-        cell(ctx.get("hypotheses")),
-        cell(ctx.get("prior_tactics")),
-        cell(prov.get("source_file")),
-        cell(prov.get("line")),
-        cell(prov.get("tactic_kind")),
-        cell(gen.get("generator_model")),
-        cell(gen.get("verifier_model")),
-        cell(gen.get("seed")),
-    ]
-
-
-def write_csv(items: list[dict[str, Any]], out: Path, max_len: int | None) -> None:
-    with out.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-        writer.writerow(COLUMNS)
-        for item in items:
-            writer.writerow(flatten_for_csv(item, max_len))
+SCENARIO_COLORS = {
+    "local_only": "#dbeafe",
+    "mathlib_only": "#dcfce7",
+    "mixed": "#fef3c7",
+}
 
 
 def _h(value: Any) -> str:
@@ -118,6 +71,7 @@ def _row_html(item: dict[str, Any]) -> str:
 
     cells = [
         f'<td class="id">{_h(item.get("id"))}</td>',
+        f"<td>{_h(item.get('project'))}</td>",
         f'<td class="scenario scenario-{_h(scenario)}">{_h(scenario)}</td>',
         f"<td>{_h(item.get('query'))}</td>",
         f"<td><code>{_h(item.get('ground_truth_name'))}</code></td>",
@@ -227,12 +181,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    items = load_items(args.input)
     if args.format == "csv":
         max_len = None if args.no_truncate else args.max_len
-        write_csv(items, args.output, max_len)
+        write_csv(load_items(args.input), args.output, max_len)
     else:
-        write_html(items, args.output)
+        write_html(load_items_raw(args.input), args.output)
     return 0
 
 

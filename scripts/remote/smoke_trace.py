@@ -37,11 +37,11 @@ from lean_dojo_v2.lean_dojo.data_extraction.trace import (  # type: ignore[impor
     trace as ld_trace,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.remote.v2.trace_repo import (  # noqa: E402
+from scripts.remote.trace_repo import (  # noqa: E402
     _theorem_file,
     _theorem_full_name,
     _theorem_kind,

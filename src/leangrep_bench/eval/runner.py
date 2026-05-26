@@ -45,13 +45,17 @@ _VISIBILITY_OVERSAMPLE: int = 5
 
 
 def _load_corpus(corpus_dir: Path) -> list[NormalizedDeclaration]:
-    """Load the corpus. Prefers ``corpus_dir/v2/*.jsonl`` (the v2 union
-    layout); falls back to the legacy two-file layout if v2/ is absent.
+    """Load the union corpus from ``corpus_dir/union/*.jsonl``.
+
+    Falls back to the legacy single-project two-file layout
+    (``mathlib_declarations.jsonl`` + ``pfr_declarations.jsonl``) if no
+    ``union/`` directory is present, so a freshly-cloned single-project
+    checkout still evaluates.
     """
     out: list[NormalizedDeclaration] = []
-    v2_dir = corpus_dir / "v2"
-    if v2_dir.is_dir():
-        for p in sorted(v2_dir.glob("*.jsonl")):
+    union_dir = corpus_dir / "union"
+    if union_dir.is_dir():
+        for p in sorted(union_dir.glob("*.jsonl")):
             for d in read_corpus(p):
                 out.append(d)
         return out

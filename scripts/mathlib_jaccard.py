@@ -19,13 +19,13 @@ from pathlib import Path
 
 import typer
 
-from leangrep_bench.corpus.manifest import read_manifest_v2
+from leangrep_bench.corpus.manifest import read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / "data" / "corpus" / "build_manifest.json"
 UNION_DIR = REPO_ROOT / "data" / "corpus" / "v2"
 
-# v2 roadmap — keep aligned with v2_overview.md. Order matters: PFR first,
+# Multi-project roadmap. Order matters: PFR first,
 # then the planned additions. Phases that add projects also update this list.
 V2_PROJECTS: list[str] = ["pfr", "pnt", "carleson", "flt_regular"]
 
@@ -52,7 +52,7 @@ def _load_mathlib_names_for_sha(sha: str) -> set[str]:
 
 
 def _collect_projects() -> list[_ProjectInfo]:
-    manifest = read_manifest_v2(MANIFEST_PATH)
+    manifest = read_manifest(MANIFEST_PATH)
     by_name = {p.project_name: p for p in manifest.projects}
     out: list[_ProjectInfo] = []
     for name in V2_PROJECTS:

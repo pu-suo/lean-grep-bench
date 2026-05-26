@@ -16,7 +16,7 @@ from leangrep_bench.extract.model import (
 
 def _step(**overrides: Any) -> ProofStep:
     base: dict[str, Any] = dict(
-        id="pfr_step_v2_00000",
+        id="pfr_step_00000",
         source_file="PFR/HomPFR.lean",
         line=42,
         column=2,
@@ -37,7 +37,7 @@ def _step(**overrides: Any) -> ProofStep:
 def test_jsonl_round_trip(tmp_path: Path) -> None:
     rows = [
         _step(),
-        _step(id="pfr_step_v2_00001", tactic_kind="exact", cited_name="rfl"),
+        _step(id="pfr_step_00001", tactic_kind="exact", cited_name="rfl"),
     ]
     out = tmp_path / "steps.jsonl"
     n = write_jsonl(out, rows)

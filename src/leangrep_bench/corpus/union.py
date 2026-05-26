@@ -1,19 +1,19 @@
 """Union-corpus builder.
 
-Reads the v2 build manifest and the per-source declaration JSONLs produced
-by the legacy ``corpus build-mathlib`` / ``build-pfr`` commands, then writes
-a union corpus under ``data/corpus/v2/`` in which every declaration carries
-a ``visible_in`` tag identifying which ``(project_name, mathlib_sha)``
+Reads the build manifest and the per-source declaration JSONLs produced by
+``corpus build-mathlib`` / ``build-project``, then writes a union corpus
+under ``data/corpus/union/`` in which every declaration carries a
+``visible_in`` tag identifying which ``(project_name, mathlib_sha)``
 contexts can see it.
 
 The shape of the union directory:
 
-    data/corpus/v2/
+    data/corpus/union/
       mathlib__<mathlib_sha>.jsonl   # one per unique Mathlib SHA
       <project_name>__local.jsonl    # one per project
 
-For Phase 13 with PFR only, this produces exactly two files. The same code
-handles N projects with shared or distinct Mathlib SHAs.
+For a single-project checkout this produces exactly two files. The same
+code handles N projects with shared or distinct Mathlib SHAs.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 
-from leangrep_bench.corpus.manifest import BuildManifestV2, read_manifest_v2
+from leangrep_bench.corpus.manifest import BuildManifest, read_manifest
 from leangrep_bench.corpus.model import (
     NormalizedDeclaration,
     read_jsonl,
@@ -43,11 +43,11 @@ def build_union_corpus(
     legacy_corpus_dir: Path,
     out_dir: Path,
 ) -> dict[str, int]:
-    """Build the union corpus from a v2 manifest.
+    """Build the union corpus from the build manifest.
 
     Returns ``{output_file_name: row_count}`` for logging / assertions.
     """
-    manifest = read_manifest_v2(manifest_path)
+    manifest = read_manifest(manifest_path)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Group projects by their pinned Mathlib SHA so we emit one Mathlib
@@ -88,16 +88,16 @@ def build_union_corpus(
 
 
 def _mathlib_source_for_sha(
-    manifest: BuildManifestV2,
+    manifest: BuildManifest,
     mathlib_sha: str,
     legacy_corpus_dir: Path,
 ) -> Path:
     """Resolve the Mathlib JSONL covering the requested SHA.
 
-    Phase 15 (multi-project): prefer the per-SHA snapshot; fall back to the
-    legacy single-Mathlib JSONL only when it's the SHA the single legacy
-    file was produced from. Otherwise we'd silently mis-tag declarations
-    with the wrong visibility set.
+    Prefer the per-SHA snapshot (``mathlib__<sha>.jsonl``); fall back to
+    the legacy single-Mathlib JSONL only when it's the SHA the single
+    legacy file was produced from. Otherwise we'd silently mis-tag
+    declarations with the wrong visibility set.
     """
     matching = [p for p in manifest.projects if p.mathlib_sha == mathlib_sha]
     if not matching:

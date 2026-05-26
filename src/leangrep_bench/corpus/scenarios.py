@@ -22,7 +22,7 @@ automatically satisfied — there is no separate uniqueness check.
 
 For Phase 13's PFR-only manifest these definitions produce labels
 identical to v1's ``_classify`` in ``generate/pipeline.py``; the Phase
-14 regression test in ``tests/test_scenarios_v2_regression.py`` is the
+14 regression test in ``tests/test_scenarios.py`` is the
 gate that proves it.
 """
 

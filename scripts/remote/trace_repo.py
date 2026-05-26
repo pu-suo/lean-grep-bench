@@ -44,7 +44,7 @@ from typing import Any
 # Monkey-patch ``etree.parse`` to default to a huge_tree-enabled parser
 # so ``TracedRepo.load_from_disk`` can read those files back.
 # Must run BEFORE lean_dojo_v2 imports so its module-level lxml use sees it.
-import lxml.etree as _etree  # noqa: E402
+import lxml.etree as _etree
 
 _etree_orig_parse = _etree.parse
 
@@ -65,7 +65,7 @@ from lean_dojo_v2.lean_dojo.data_extraction.trace import (  # type: ignore[impor
     trace as ld_trace,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from leangrep_bench.dojo.model import (  # noqa: E402
@@ -575,7 +575,7 @@ def _run_with_deep_stack() -> None:
     def _runner() -> None:
         try:
             main()
-        except BaseException as e:  # noqa: BLE001
+        except BaseException as e:
             captured.append(e)
 
     t = threading.Thread(target=_runner)

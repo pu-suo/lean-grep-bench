@@ -6,7 +6,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from leangrep_bench.corpus.manifest import read_manifest_v2
+from leangrep_bench.corpus.manifest import read_manifest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / "data" / "corpus" / "build_manifest.json"
@@ -23,7 +23,7 @@ def test_live_manifest_parses_into_typed_model() -> None:
     """Phase 15 expanded the manifest from one project (pfr) to two (pfr +
     pnt). The test asserts on the pfr entry by name so adding a third
     project later (Carleson / FLT-regular) won't require a re-pin."""
-    manifest = read_manifest_v2(MANIFEST_PATH)
+    manifest = read_manifest(MANIFEST_PATH)
     assert manifest.schema_version == "v2"
     assert manifest.projects, "manifest must list at least one project"
     by_name = {p.project_name: p for p in manifest.projects}

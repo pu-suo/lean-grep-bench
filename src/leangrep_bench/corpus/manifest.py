@@ -24,7 +24,7 @@ class ProjectEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class BuildManifestV2(BaseModel):
+class BuildManifest(BaseModel):
     schema_version: str
     built_at: str
     projects: list[ProjectEntry]
@@ -32,10 +32,16 @@ class BuildManifestV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def read_manifest_v2(path: Path) -> BuildManifestV2:
-    """Load and validate a v2 build manifest."""
+def read_manifest(path: Path) -> BuildManifest:
+    """Load and validate the build manifest.
+
+    Pinned at ``schema_version == "v2"`` for the same reason the file
+    itself records that string: it's the on-disk format identifier so a
+    future schema rev can be detected, not a marker of "v2 vs v1
+    pipeline." The pipeline is just "the pipeline" now.
+    """
     data = json.loads(path.read_text(encoding="utf-8"))
-    manifest = BuildManifestV2.model_validate(data)
+    manifest = BuildManifest.model_validate(data)
     if manifest.schema_version != "v2":
         raise ValueError(
             f"expected schema_version='v2', got {manifest.schema_version!r}"
@@ -75,11 +81,12 @@ def write_manifest(
     ``build-mathlib`` and ``build-pfr`` separately still produces a single
     manifest with both SHAs.
 
-    No-op when the existing file is a v2 manifest. v2 carries multi-project
-    structure that the v1 single-mathlib + single-pfr flat layout cannot
-    represent; injecting v1-shaped keys breaks the v2 ``extra="forbid"``
-    schema. v2 manifests are edited by the operator (or by ``corpus
-    build-project``-style commands), not by ``build-mathlib``.
+    No-op when the existing file is a typed BuildManifest (schema_version
+    set). That schema carries multi-project structure that this legacy
+    flat-key writer cannot represent; injecting flat keys breaks the
+    ``extra="forbid"`` validator. Typed manifests are edited by the
+    operator (or by ``corpus build-project``-style commands), not by
+    ``build-mathlib``.
     """
     manifest: dict[str, Any] = {}
     if out_path.exists():

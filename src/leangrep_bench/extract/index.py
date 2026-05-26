@@ -34,9 +34,9 @@ class CorpusIndex:
     def from_jsonls(
         cls, mathlib_path: Path | None, pfr_path: Path | None
     ) -> CorpusIndex:
-        """Legacy v1 loader: read the two separate ``mathlib`` / ``pfr``
-        JSONLs. Kept for backward compatibility with v1 callers and tests.
-        Prefer :meth:`from_v2_dir` for new code.
+        """Legacy loader: read the two separate ``mathlib`` / ``pfr``
+        JSONLs. Kept so a single-project checkout that hasn't built the
+        union corpus yet still works. Prefer :meth:`from_union_dir`.
         """
         rows: list[CorpusEntry] = []
         for path, default_source in (
@@ -55,14 +55,14 @@ class CorpusIndex:
         return cls(rows)
 
     @classmethod
-    def from_v2_dir(
+    def from_union_dir(
         cls,
-        v2_dir: Path,
+        union_dir: Path,
         *,
         project: str | None = None,
         mathlib_sha: str | None = None,
     ) -> CorpusIndex:
-        """v2 loader: read every ``*.jsonl`` under the v2 union corpus dir.
+        """Read every ``*.jsonl`` under the union corpus dir.
 
         Each ``NormalizedDeclaration`` already carries its ``source`` field
         as either ``"mathlib"`` or ``"local:<project>"``; we preserve that
@@ -79,7 +79,7 @@ class CorpusIndex:
         if project is not None and mathlib_sha is not None:
             target_ctx = (project, mathlib_sha)
         rows: list[CorpusEntry] = []
-        for p in sorted(v2_dir.glob("*.jsonl")):
+        for p in sorted(union_dir.glob("*.jsonl")):
             for d in read_jsonl(p):
                 if target_ctx is not None and not any(
                     (ctx[0], ctx[1]) == target_ctx for ctx in d.visible_in
@@ -96,17 +96,18 @@ class CorpusIndex:
         project: str | None = None,
         mathlib_sha: str | None = None,
     ) -> CorpusIndex:
-        """Pick v2 layout when present, else fall back to the v1 layout.
+        """Pick the union layout when present, else fall back to the legacy
+        two-file layout.
 
-        Allows operator-side commands to stay layout-agnostic. When ``project``
-        and ``mathlib_sha`` are supplied and the v2 layout is in use, the
-        returned index is restricted to declarations visible under that
-        context — see :meth:`from_v2_dir`.
+        Allows operator-side commands to stay layout-agnostic. When
+        ``project`` and ``mathlib_sha`` are supplied and the union layout
+        is in use, the returned index is restricted to declarations visible
+        under that context — see :meth:`from_union_dir`.
         """
-        v2_dir = corpus_dir / "v2"
-        if v2_dir.is_dir() and any(v2_dir.glob("*.jsonl")):
-            return cls.from_v2_dir(
-                v2_dir, project=project, mathlib_sha=mathlib_sha
+        union_dir = corpus_dir / "union"
+        if union_dir.is_dir() and any(union_dir.glob("*.jsonl")):
+            return cls.from_union_dir(
+                union_dir, project=project, mathlib_sha=mathlib_sha
             )
         return cls.from_jsonls(
             mathlib_path=corpus_dir / "mathlib_declarations.jsonl",

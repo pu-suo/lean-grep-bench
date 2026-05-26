@@ -89,7 +89,7 @@ def test_csv_columns_and_row_count(tmp_path: Path) -> None:
     with out.open(encoding="utf-8", newline="") as f:
         rows = list(csv.reader(f))
 
-    assert rows[0] == convert_benchmark.COLUMNS
+    assert tuple(rows[0]) == tuple(convert_benchmark.COLUMNS)
     assert len(rows) == 1 + len(FIXTURE)
     for row in rows:
         assert len(row) == len(convert_benchmark.COLUMNS)

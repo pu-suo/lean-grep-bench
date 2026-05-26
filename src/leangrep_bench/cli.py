@@ -6,7 +6,7 @@ import typer
 from leangrep_bench import __version__
 from leangrep_bench.adapters.registry import list_adapters
 from leangrep_bench.corpus.build import build_corpus
-from leangrep_bench.corpus.manifest import read_manifest_v2, write_manifest
+from leangrep_bench.corpus.manifest import read_manifest, write_manifest
 from leangrep_bench.corpus.stats import compute_stats, format_stats
 from leangrep_bench.corpus.union import build_union_corpus
 from leangrep_bench.dojo.cli import dojo_app
@@ -51,15 +51,16 @@ app.add_typer(dojo_app, name="dojo")
 def _project_dir(project: str) -> Path:
     """Per-project working directory under ``data/<project>/``.
 
-    Phase 15 switched to project-scoped subdirs so PFR's existing top-level
-    files stay untouched while new projects (PNT, Carleson, …) get their own
-    namespace. The merge step pulls these together into ``data/benchmark.jsonl``.
+    All per-project artifacts (proof_steps, queries, benchmark, audit)
+    live under this directory. The top-level ``data/benchmark.jsonl`` and
+    ``data/benchmark.csv`` are the union across projects, produced by
+    ``benchmark merge``.
     """
     return Path("data") / project
 
 
 def _manifest_lookup_mathlib_sha(project: str) -> str | None:
-    """Read ``mathlib_sha`` for ``project`` from the v2 build manifest, if
+    """Read ``mathlib_sha`` for ``project`` from the build manifest, if
     available. Returns ``None`` if the manifest is missing or doesn't list
     this project — the extract pipeline will still emit ``ProofStep`` rows
     but without the visibility-filter hint."""
@@ -67,7 +68,7 @@ def _manifest_lookup_mathlib_sha(project: str) -> str | None:
     if not manifest_path.exists():
         return None
     try:
-        manifest = read_manifest_v2(manifest_path)
+        manifest = read_manifest(manifest_path)
     except Exception:
         # Best-effort lookup — any parse/IO error is just "use None".
         return None
@@ -108,25 +109,6 @@ def corpus_build_mathlib(
     typer.echo(f"updated manifest: {manifest}")
 
 
-@corpus_app.command("build-pfr")
-def corpus_build_pfr(
-    pfr_path: Path = typer.Option(
-        ..., "--pfr-path", help="Local PFR checkout."
-    ),
-    out: Path = typer.Option(..., "--out", help="Output JSONL path."),
-    manifest: Path = typer.Option(
-        Path("data/corpus/build_manifest.json"),
-        "--manifest",
-        help="Build manifest output path.",
-    ),
-) -> None:
-    """Parse a PFR checkout into a JSONL of declarations."""
-    n = build_corpus(pfr_path, out, source="local:pfr", sub_dir="PFR")
-    typer.echo(f"wrote {n:,} declarations to {out}")
-    write_manifest(manifest, mathlib_path=None, pfr_path=pfr_path)
-    typer.echo(f"updated manifest: {manifest}")
-
-
 @corpus_app.command("build-project")
 def corpus_build_project(
     project: str = typer.Option(
@@ -150,11 +132,10 @@ def corpus_build_project(
 ) -> None:
     """Parse an arbitrary Lean project into a JSONL of declarations.
 
-    Generalization of ``corpus build-pfr`` so the v2 multi-project pipeline
-    can add PNT / Carleson / FLT-regular without bespoke CLI commands.
-    The manifest is updated separately — operators add the entry by hand
-    or via ``corpus build-mathlib`` for the Mathlib SHA that pairs with
-    this project.
+    Used by the multi-project pipeline to add PNT / Carleson / FLT-regular
+    without bespoke CLI commands. The manifest is updated separately —
+    operators add the entry by hand or via ``corpus build-mathlib`` for
+    the Mathlib SHA that pairs with this project.
     """
     if out is None:
         out = Path("data") / "corpus" / f"{project}_declarations.jsonl"
@@ -172,7 +153,7 @@ def corpus_build_union(
     manifest: Path = typer.Option(
         Path("data/corpus/build_manifest.json"),
         "--manifest",
-        help="v2 build manifest listing projects with visibility info.",
+        help="Build manifest listing projects with visibility info.",
     ),
     legacy_corpus_dir: Path = typer.Option(
         Path("data/corpus"),
@@ -180,12 +161,12 @@ def corpus_build_union(
         help="Directory holding the per-source JSONLs (mathlib + project).",
     ),
     out_dir: Path = typer.Option(
-        Path("data/corpus/v2"),
+        Path("data/corpus/union"),
         "--out-dir",
         help="Where to write the union corpus.",
     ),
 ) -> None:
-    """Build the union corpus with per-decl visible_in tags from the v2 manifest."""
+    """Build the union corpus with per-decl visible_in tags from the manifest."""
     counts = build_union_corpus(
         manifest_path=manifest,
         legacy_corpus_dir=legacy_corpus_dir,
@@ -209,53 +190,43 @@ def corpus_stats(
 @extract_app.command("proof-steps")
 def extract_proof_steps_cmd(
     project: str = typer.Option(
-        "pfr",
+        ...,
         "--project",
         help="Project name. Used to stamp ProofStep.project, pick the trace "
-        "directory (data/dojo_trace_<project>), and derive default output "
-        "paths. PFR keeps its legacy data/dojo_trace/ trace dir.",
+        "directory (``data/dojo_trace_<project>``), and derive default "
+        "output paths under ``data/<project>/``.",
     ),
     trace_dir: Path | None = typer.Option(
         None,
         "--trace-dir",
         help="Directory of LeanDojo trace JSONLs (or a single .jsonl file). "
-        "Defaults to data/dojo_trace_<project>/ (or data/dojo_trace/ for "
-        "the legacy PFR project).",
+        "Defaults to ``data/dojo_trace_<project>/``.",
     ),
     corpus_dir: Path = typer.Option(
         Path("data/corpus"),
         "--corpus-dir",
-        help="Corpus root. Prefers the v2 union under <corpus-dir>/v2/; "
-        "falls back to the v1 two-file layout.",
+        help="Corpus root. Prefers the union corpus under "
+        "``<corpus-dir>/union/``; falls back to the legacy two-file layout.",
     ),
     out: Path | None = typer.Option(
         None,
         "--out",
         help="Output JSONL path. Defaults to "
-        "data/<project>/proof_steps.jsonl (or data/proof_steps.jsonl for "
-        "the legacy PFR project).",
+        "``data/<project>/proof_steps.jsonl``.",
     ),
     mathlib_sha: str | None = typer.Option(
         None,
         "--mathlib-sha",
         help="Mathlib SHA pinned by this project. If omitted, looked up "
-        "from the v2 build manifest; stamped on every emitted ProofStep so "
+        "from the build manifest; stamped on every emitted ProofStep so "
         "the eval-time visibility filter knows where to look.",
     ),
 ) -> None:
     """Convert LeanDojo traces into project-tagged proof-step records."""
     if trace_dir is None:
-        trace_dir = (
-            Path("data") / "dojo_trace"
-            if project == "pfr"
-            else Path("data") / f"dojo_trace_{project}"
-        )
+        trace_dir = Path("data") / f"dojo_trace_{project}"
     if out is None:
-        out = (
-            Path("data") / "proof_steps.jsonl"
-            if project == "pfr"
-            else _project_dir(project) / "proof_steps.jsonl"
-        )
+        out = _project_dir(project) / "proof_steps.jsonl"
     if mathlib_sha is None:
         mathlib_sha = _manifest_lookup_mathlib_sha(project)
         if mathlib_sha is not None:
@@ -315,23 +286,21 @@ def _estimate_cost(steps_path: Path, model: str) -> tuple[int, float]:
 @generate_app.command("queries")
 def generate_queries_cmd(
     project: str = typer.Option(
-        "pfr",
+        ...,
         "--project",
-        help="Project name. Drives default paths for steps/out/audit so "
-        "running the LLM step against PNT vs PFR doesn't need bespoke flags.",
+        help="Project name. Drives default paths for steps/out/audit.",
     ),
     steps: Path | None = typer.Option(
         None,
         "--steps",
         help="ProofStep JSONL produced by ``extract proof-steps``. "
-        "Defaults to data/<project>/proof_steps.jsonl (or "
-        "data/proof_steps.jsonl for legacy PFR).",
+        "Defaults to ``data/<project>/proof_steps.jsonl``.",
     ),
     out: Path | None = typer.Option(
         None,
         "--out",
-        help="Output queries JSONL. Defaults to data/<project>/queries.jsonl "
-        "(or data/queries.jsonl for legacy PFR).",
+        help="Output queries JSONL. Defaults to "
+        "``data/<project>/queries.jsonl``.",
     ),
     model: str = typer.Option(
         "gpt-5-mini", "--model", help="OpenAI model identifier."
@@ -344,14 +313,13 @@ def generate_queries_cmd(
     corpus_dir: Path = typer.Option(
         Path("data/corpus"),
         "--corpus-dir",
-        help="Corpus dir. Prefers the v2 union for scenario classification.",
+        help="Corpus dir. Prefers the union corpus for scenario classification.",
     ),
     audit_out: Path | None = typer.Option(
         None,
         "--audit-out",
         help="Audit markdown output path. Defaults to "
-        "data/<project>/queries_audit.md (or data/queries_audit.md for "
-        "legacy PFR).",
+        "``data/<project>/queries_audit.md``.",
     ),
     concurrency: int = typer.Option(
         8, "--concurrency", help="Parallel API workers."
@@ -362,23 +330,11 @@ def generate_queries_cmd(
 ) -> None:
     """Generate one query per proof step using an LLM. Resume-safe."""
     if steps is None:
-        steps = (
-            Path("data/proof_steps.jsonl")
-            if project == "pfr"
-            else _project_dir(project) / "proof_steps.jsonl"
-        )
+        steps = _project_dir(project) / "proof_steps.jsonl"
     if out is None:
-        out = (
-            Path("data/queries.jsonl")
-            if project == "pfr"
-            else _project_dir(project) / "queries.jsonl"
-        )
+        out = _project_dir(project) / "queries.jsonl"
     if audit_out is None:
-        audit_out = (
-            Path("data/queries_audit.md")
-            if project == "pfr"
-            else _project_dir(project) / "queries_audit.md"
-        )
+        audit_out = _project_dir(project) / "queries_audit.md"
     n_steps, est = _estimate_cost(steps, model)
     typer.echo(
         f"Cost estimate: ~${est:.2f} for {n_steps:,} steps "
@@ -408,10 +364,9 @@ def generate_queries_cmd(
 @verify_app.command("queries")
 def verify_queries_cmd(
     project: str = typer.Option(
-        "pfr",
+        ...,
         "--project",
-        help="Project name. Drives default paths so verifying PNT vs PFR "
-        "doesn't need bespoke flags.",
+        help="Project name. Drives default paths.",
     ),
     queries: Path | None = typer.Option(
         None, "--queries", help="Generated queries JSONL."
@@ -422,20 +377,20 @@ def verify_queries_cmd(
     corpus_dir: Path = typer.Option(
         Path("data/corpus"),
         "--corpus-dir",
-        help="Corpus root. Prefers the v2 union under <corpus-dir>/v2/.",
+        help="Corpus root. Prefers the union corpus under "
+        "``<corpus-dir>/union/``.",
     ),
     out: Path | None = typer.Option(
         None,
         "--out",
         help="Accepted (benchmark) JSONL output path. Defaults to "
-        "data/<project>/benchmark.jsonl (or data/benchmark.jsonl for legacy PFR).",
+        "``data/<project>/benchmark.jsonl``.",
     ),
     rejected: Path | None = typer.Option(
         None,
         "--rejected",
         help="Rejected items JSONL output path. Defaults to "
-        "data/<project>/benchmark_rejected.jsonl (or "
-        "data/benchmark_rejected.jsonl for legacy PFR).",
+        "``data/<project>/benchmark_rejected.jsonl``.",
     ),
     model: str = typer.Option(
         "gpt-5", "--model", help="Verifier OpenAI model identifier."
@@ -451,45 +406,24 @@ def verify_queries_cmd(
         None,
         "--audit-out",
         help="Audit markdown output path. Defaults to "
-        "data/<project>/benchmark_audit.md (or data/benchmark_audit.md "
-        "for legacy PFR).",
+        "``data/<project>/benchmark_audit.md``.",
     ),
     concurrency: int = typer.Option(
         16, "--concurrency", help="Parallel API workers."
     ),
 ) -> None:
     """Run the verifier over generated queries; write the accepted benchmark."""
-    legacy_pfr = project == "pfr"
+    pdir = _project_dir(project)
     if queries is None:
-        queries = (
-            Path("data/queries.jsonl")
-            if legacy_pfr
-            else _project_dir(project) / "queries.jsonl"
-        )
+        queries = pdir / "queries.jsonl"
     if steps is None:
-        steps = (
-            Path("data/proof_steps.jsonl")
-            if legacy_pfr
-            else _project_dir(project) / "proof_steps.jsonl"
-        )
+        steps = pdir / "proof_steps.jsonl"
     if out is None:
-        out = (
-            Path("data/benchmark.jsonl")
-            if legacy_pfr
-            else _project_dir(project) / "benchmark.jsonl"
-        )
+        out = pdir / "benchmark.jsonl"
     if rejected is None:
-        rejected = (
-            Path("data/benchmark_rejected.jsonl")
-            if legacy_pfr
-            else _project_dir(project) / "benchmark_rejected.jsonl"
-        )
+        rejected = pdir / "benchmark_rejected.jsonl"
     if audit_out is None:
-        audit_out = (
-            Path("data/benchmark_audit.md")
-            if legacy_pfr
-            else _project_dir(project) / "benchmark_audit.md"
-        )
+        audit_out = pdir / "benchmark_audit.md"
     stats = verify_queries(
         queries_path=queries,
         steps_path=steps,
@@ -512,13 +446,44 @@ def verify_queries_cmd(
     typer.echo(f"audit at {audit_out}")
 
 
+@benchmark_app.command("export-csv")
+def benchmark_export_csv_cmd(
+    inp: Path = typer.Option(
+        Path("data/benchmark.jsonl"),
+        "--input",
+        "-i",
+        help="Benchmark JSONL to export (defaults to the unified file).",
+    ),
+    out: Path = typer.Option(
+        Path("data/benchmark.csv"),
+        "--out",
+        help="CSV output path.",
+    ),
+    max_len: int = typer.Option(
+        500,
+        "--max-len",
+        help="Truncate long cells to this many characters. 0 = no truncation.",
+    ),
+) -> None:
+    """Flatten the benchmark JSONL into a human-viewable CSV.
+
+    Thin wrapper around ``scripts/convert_benchmark.py`` so the CSV stays
+    in sync with the merged ``data/benchmark.jsonl`` via one CLI surface.
+    """
+    from leangrep_bench.benchmark_export import load_items, write_csv
+
+    items = load_items(inp)
+    write_csv(items, out, max_len if max_len > 0 else None)
+    typer.echo(f"wrote {len(items):,} items to {out}")
+
+
 @benchmark_app.command("merge")
 def benchmark_merge_cmd(
     inputs: list[Path] = typer.Option(
         ...,
         "--input",
         "-i",
-        help="One or more per-project benchmark JSONLs (the v2 verifier "
+        help="One or more per-project benchmark JSONLs (the verifier "
         "writes these to data/<project>/benchmark.jsonl). Order matters "
         "only for deterministic logging.",
     ),

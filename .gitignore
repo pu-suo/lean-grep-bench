@@ -30,7 +30,7 @@ specs/
 # and stay tracked.
 data/corpus/mathlib_declarations.jsonl
 data/corpus/mathlib__*.jsonl
-data/corpus/v2/mathlib__*.jsonl
+data/corpus/union/mathlib__*.jsonl
 
 # Trace logs from full PNT/Carleson/FLT-regular runs — ephemeral.
 full_trace_*.log

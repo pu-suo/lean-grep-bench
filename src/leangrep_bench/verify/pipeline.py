@@ -114,14 +114,15 @@ class _Job:
 def _build_corpus_lookup(corpus_dir: Path) -> dict[str, tuple[str, str, str | None]]:
     """Map qualified_name -> (kind, signature, docstring).
 
-    Prefers the v2 union corpus at ``corpus_dir/v2/*.jsonl``; falls back to
-    the v1 two-file layout (``mathlib_declarations.jsonl`` +
-    ``pfr_declarations.jsonl``) so legacy tests still pass without v2 data.
+    Prefers the union corpus at ``corpus_dir/union/*.jsonl``; falls back
+    to the legacy two-file layout (``mathlib_declarations.jsonl`` +
+    ``pfr_declarations.jsonl``) so single-project checkouts that haven't
+    built the union still work.
     """
     out: dict[str, tuple[str, str, str | None]] = {}
-    v2_dir = corpus_dir / "v2"
-    if v2_dir.is_dir() and any(v2_dir.glob("*.jsonl")):
-        for p in sorted(v2_dir.glob("*.jsonl")):
+    union_dir = corpus_dir / "union"
+    if union_dir.is_dir() and any(union_dir.glob("*.jsonl")):
+        for p in sorted(union_dir.glob("*.jsonl")):
             for d in read_corpus(p):
                 # Last writer wins on collisions. Mathlib + project locals
                 # share qualified-name space only on PFR/Mathlib staging
