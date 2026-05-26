@@ -38,11 +38,30 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# lxml's default XML-depth limit is 256, but LeanDojo-v2's cached
+# ``*.trace.xml`` files can be deeper for projects with heavy tactic
+# expansions (PNT's BKLNW interval-arithmetic tables overflow it).
+# Monkey-patch ``etree.parse`` to default to a huge_tree-enabled parser
+# so ``TracedRepo.load_from_disk`` can read those files back.
+# Must run BEFORE lean_dojo_v2 imports so its module-level lxml use sees it.
+import lxml.etree as _etree  # noqa: E402
+
+_etree_orig_parse = _etree.parse
+
+
+def _etree_parse_huge(source, parser=None, base_url=None):  # type: ignore[no-untyped-def]
+    if parser is None:
+        parser = _etree.XMLParser(huge_tree=True)
+    return _etree_orig_parse(source, parser, base_url=base_url)
+
+
+_etree.parse = _etree_parse_huge  # type: ignore[assignment]
+
 # ``lean_dojo_v2`` is only importable on the EC2 trace box.
-from lean_dojo_v2.lean_dojo.data_extraction.lean import (  # type: ignore[import-not-found]
+from lean_dojo_v2.lean_dojo.data_extraction.lean import (  # type: ignore[import-not-found]  # noqa: E402
     LeanGitRepo,
 )
-from lean_dojo_v2.lean_dojo.data_extraction.trace import (  # type: ignore[import-not-found]
+from lean_dojo_v2.lean_dojo.data_extraction.trace import (  # type: ignore[import-not-found]  # noqa: E402
     trace as ld_trace,
 )
 
@@ -538,6 +557,10 @@ def _run_with_deep_stack() -> None:
     PNT's ``LeanCert`` interval-arithmetic terms. Raise the recursion limit and
     run on a thread with a large C stack so we parse them instead of crashing
     with RecursionError (or segfaulting on a too-small stack).
+
+    Exceptions in the worker thread are captured and re-raised in the caller
+    so a failed run exits non-zero — without this, the run script saw exit 0
+    on thread crashes and auto-stopped the instance regardless.
     """
     import threading
 
@@ -546,9 +569,20 @@ def _run_with_deep_stack() -> None:
         threading.stack_size(1024 * 1024 * 1024)  # 1 GB
     except (ValueError, OverflowError):
         threading.stack_size(256 * 1024 * 1024)  # fallback 256 MB
-    t = threading.Thread(target=main)
+
+    captured: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            main()
+        except BaseException as e:  # noqa: BLE001
+            captured.append(e)
+
+    t = threading.Thread(target=_runner)
     t.start()
     t.join()
+    if captured:
+        raise captured[0]
 
 
 if __name__ == "__main__":
