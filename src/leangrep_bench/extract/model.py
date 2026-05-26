@@ -10,7 +10,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 TacticKind = Literal["apply", "exact", "use", "refine"]
-CitedSource = Literal["mathlib", "pfr"]
+# v2 source convention: ``"mathlib"`` for upstream lemmas, ``"local:<project>"``
+# for declarations native to the traced project. v1 wrote ``"pfr"`` directly;
+# loosening this to ``str`` keeps old files readable while letting new files
+# carry the v2 form.
+CitedSource = str
 
 
 class ProofStep(BaseModel):
@@ -20,6 +24,11 @@ class ProofStep(BaseModel):
     come from ``state_before_pp`` rather than being null/source-text, and
     ``cited_name`` is the elaborated full name from LeanDojo's premise
     resolution rather than a regex-parsed identifier.
+
+    Multi-project (Phase 15) adds ``project`` and ``mathlib_sha`` so the
+    downstream pipeline can apply the union-corpus visibility filter without
+    consulting the manifest again. Both default for back-compat with v1's
+    PFR-only ``data/proof_steps.jsonl``.
     """
 
     id: str
@@ -39,6 +48,12 @@ class ProofStep(BaseModel):
     prior_tactics: list[str]
 
     raw_tactic_line: str
+
+    # v2 corpus context. ``project`` defaults to ``"pfr"`` so the pre-existing
+    # ``data/proof_steps.jsonl`` (written before Phase 15) still validates.
+    # ``mathlib_sha`` is optional because legacy rows omit it.
+    project: str = "pfr"
+    mathlib_sha: str | None = None
 
     model_config = ConfigDict(extra="ignore")
 

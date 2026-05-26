@@ -20,6 +20,7 @@ from leangrep_bench.corpus.model import read_jsonl as read_corpus
 from leangrep_bench.extract.model import read_jsonl as read_steps
 from leangrep_bench.generate.model import read_jsonl as read_queries
 from leangrep_bench.llm import ChatRequest, LLMClient
+from leangrep_bench.verify.ids import mint_item_id
 from leangrep_bench.verify.model import (
     BenchmarkContext,
     BenchmarkItem,
@@ -27,7 +28,6 @@ from leangrep_bench.verify.model import (
     Provenance,
     RejectedItem,
     Scenario,
-    Source,
     read_jsonl_raw,
 )
 from leangrep_bench.verify.prompt import (
@@ -101,6 +101,8 @@ class _Job:
     tactic_kind: str
     generator_model: str
     seed: int
+    project: str
+    mathlib_sha: str | None
 
 
 # The pipeline body accesses ``step`` and ``q`` via attribute access only,
@@ -110,8 +112,22 @@ class _Job:
 
 
 def _build_corpus_lookup(corpus_dir: Path) -> dict[str, tuple[str, str, str | None]]:
-    """Map qualified_name -> (kind, signature, docstring)."""
+    """Map qualified_name -> (kind, signature, docstring).
+
+    Prefers the v2 union corpus at ``corpus_dir/v2/*.jsonl``; falls back to
+    the v1 two-file layout (``mathlib_declarations.jsonl`` +
+    ``pfr_declarations.jsonl``) so legacy tests still pass without v2 data.
+    """
     out: dict[str, tuple[str, str, str | None]] = {}
+    v2_dir = corpus_dir / "v2"
+    if v2_dir.is_dir() and any(v2_dir.glob("*.jsonl")):
+        for p in sorted(v2_dir.glob("*.jsonl")):
+            for d in read_corpus(p):
+                # Last writer wins on collisions. Mathlib + project locals
+                # share qualified-name space only on PFR/Mathlib staging
+                # copies; either entry is acceptable for the verifier prompt.
+                out[d.qualified_name] = (d.kind, d.signature, d.docstring)
+        return out
     for fname in ("mathlib_declarations.jsonl", "pfr_declarations.jsonl"):
         p = corpus_dir / fname
         if not p.exists():
@@ -189,12 +205,25 @@ def verify_queries(
 
     for q in read_queries(queries_path):
         stats.total_queries += 1
-        if q.id in accepted_existing or q.id in rejected_existing:
-            stats.skipped_existing += 1
-            continue
         step = steps_by_id.get(q.proof_step_id)
         if step is None:
             logger.warning("query %s has no matching proof step; skipping", q.id)
+            continue
+        # v2: the accepted-side ID is a content hash over (project, goal,
+        # hypotheses, prior_tactics, cited_lemma). Compute it up-front so we
+        # can short-circuit if this row already landed on the accepted JSONL.
+        would_be_accepted_id = mint_item_id(
+            project=step.project,
+            goal=step.goal_text,
+            hypotheses=step.hypotheses,
+            prior_tactics=step.prior_tactics,
+            cited_lemma_qualified_name=step.cited_name,
+        )
+        if (
+            would_be_accepted_id in accepted_existing
+            or q.id in rejected_existing
+        ):
+            stats.skipped_existing += 1
             continue
         info = corpus_lookup.get(step.cited_name)
         if info is None:
@@ -226,6 +255,8 @@ def verify_queries(
                 tactic_kind=step.tactic_kind,
                 generator_model=q.generator_model,
                 seed=q.seed,
+                project=step.project,
+                mathlib_sha=step.mathlib_sha,
             )
         )
 
@@ -261,6 +292,18 @@ def verify_queries(
                         stats.api_calls += 1
                         stats.prompt_tokens += ptok
                         stats.completion_tokens += ctok
+                    # v2: mint the accepted-item ID from the proof-step content
+                    # tuple so the same step always lands on the same ID
+                    # across regenerations and across projects. Rejections keep
+                    # the query ID because they're keyed by attempt, not by
+                    # an accepted artifact.
+                    accepted_id = mint_item_id(
+                        project=job.project,
+                        goal=job.goal,
+                        hypotheses=job.hypotheses,
+                        prior_tactics=job.prior_tactics,
+                        cited_lemma_qualified_name=job.cited_name,
+                    )
                     if verdict is None:
                         stats.parse_errors += 1
                         # Treat unparseable as a rejection with explicit reason.
@@ -269,9 +312,7 @@ def verify_queries(
                             proof_step_id=job.proof_step_id,
                             query=job.query,
                             ground_truth_name=job.cited_name,
-                            ground_truth_source=_normalize_source(
-                                job.cited_source
-                            ),
+                            ground_truth_source=job.cited_source,
                             scenario=_normalize_scenario(job.scenario),
                             verifier_model=model,
                             reason="(verifier output unparseable)",
@@ -282,13 +323,11 @@ def verify_queries(
                         continue
                     if verdict.is_yes:
                         item = BenchmarkItem(
-                            id=job.query_id,
+                            id=accepted_id,
                             scenario=_normalize_scenario(job.scenario),
                             query=job.query,
                             ground_truth_name=job.cited_name,
-                            ground_truth_source=_normalize_source(
-                                job.cited_source
-                            ),
+                            ground_truth_source=job.cited_source,
                             context=BenchmarkContext(
                                 enclosing_decl=job.enclosing_decl,
                                 enclosing_signature=job.enclosing_signature,
@@ -306,6 +345,8 @@ def verify_queries(
                                 verifier_model=model,
                                 seed=job.seed,
                             ),
+                            project=job.project,
+                            mathlib_sha=job.mathlib_sha,
                         )
                         out_file.write(item.model_dump_json() + "\n")
                         out_file.flush()
@@ -317,9 +358,7 @@ def verify_queries(
                             proof_step_id=job.proof_step_id,
                             query=job.query,
                             ground_truth_name=job.cited_name,
-                            ground_truth_source=_normalize_source(
-                                job.cited_source
-                            ),
+                            ground_truth_source=job.cited_source,
                             scenario=_normalize_scenario(job.scenario),
                             verifier_model=model,
                             reason=verdict.reason,
@@ -345,9 +384,3 @@ def _normalize_scenario(s: str) -> Scenario:
     if s == "local_only" or s == "mathlib_only" or s == "mixed":
         return s
     raise ValueError(f"unexpected scenario: {s!r}")
-
-
-def _normalize_source(s: str) -> Source:
-    if s == "mathlib" or s == "pfr":
-        return s
-    raise ValueError(f"unexpected source: {s!r}")

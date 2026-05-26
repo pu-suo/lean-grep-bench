@@ -26,6 +26,11 @@ MODIFIERS: tuple[str, ...] = (
     "noncomputable",
     "partial",
     "unsafe",
+    # ``nonrec`` marks a non-recursive override of a definition that shadows an
+    # outer namespace name (e.g. ``nonrec theorem HasDerivAt.comp`` in Mathlib's
+    # ``Analysis/Calculus/Deriv/Comp.lean``). Without this we silently lose
+    # ~590 decls per Mathlib snapshot.
+    "nonrec",
 )
 
 SKIP_DIR_NAMES: frozenset[str] = frozenset(

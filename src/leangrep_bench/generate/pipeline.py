@@ -5,6 +5,14 @@ threadpool-parallel, on-disk LLM cache keyed by request hash. Tracks
 two leakage flags per query: cited-name leakage (the query mentions
 the ground-truth declaration's name) and goal-restatement leakage
 (the query copies a long verbatim substring of the goal text).
+
+Phase 15 routed scenario classification through the v2 union corpus.
+When ``data/corpus/v2/`` is present the pipeline builds a single
+:class:`ScenarioIndex` from it and dispatches each step to
+:func:`classify_scenario` with the step's ``(project, mathlib_sha)``
+context — the same logic the eval-time visibility filter uses. The
+legacy v1 binary classifier is kept as the fallback for older corpora
+that pre-date Phase 13.
 """
 
 from __future__ import annotations
@@ -17,6 +25,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from leangrep_bench.corpus.model import read_jsonl as read_corpus
+from leangrep_bench.corpus.scenarios import (
+    CitedLemmaNotInCorpus,
+    ScenarioIndex,
+    build_scenario_index,
+    classify_scenario,
+)
 from leangrep_bench.extract.model import ProofStep
 from leangrep_bench.extract.model import read_jsonl as read_steps
 from leangrep_bench.generate.model import (
@@ -66,39 +80,99 @@ class GenerationStats:
         )
 
 
-def _shadowed_short_names(corpus_dir: Path) -> set[str]:
+@dataclass
+class _Classifier:
+    """Pick a scenario for a proof step.
+
+    Prefers the v2 union-corpus classifier (Phase 14). When no v2 corpus is
+    available (legacy callers, tests with minimal fixtures), falls back to
+    the v1 short-name-shadow heuristic so downstream code keeps working.
+    """
+
+    v2_index: ScenarioIndex | None
+    legacy_shadowed: frozenset[str]
+
+    def classify(self, step: ProofStep) -> Scenario:
+        if self.v2_index is not None:
+            project = step.project
+            mathlib_sha = step.mathlib_sha or ""
+            try:
+                return classify_scenario(
+                    project=project,
+                    mathlib_sha=mathlib_sha,
+                    cited_lemma_qualified_name=step.cited_name,
+                    index=self.v2_index,
+                )
+            except CitedLemmaNotInCorpus:
+                # Data-integrity issue (cited lemma is in neither Mathlib nor
+                # project locals under this context). Fall through to the
+                # legacy heuristic so the pipeline doesn't crash mid-run; the
+                # downstream verify step will reject the row anyway because
+                # the lookup will miss.
+                logger.warning(
+                    "step %s: cited %s not in v2 corpus under "
+                    "project=%s mathlib_sha=%s; using legacy heuristic",
+                    step.id,
+                    step.cited_name,
+                    project,
+                    mathlib_sha,
+                )
+        # Legacy path (v1 binary classifier).
+        if step.cited_source == "mathlib":
+            return "mathlib_only"
+        short = step.cited_name.split(".")[-1]
+        if short in self.legacy_shadowed:
+            return "mixed"
+        return "local_only"
+
+
+def _legacy_shadowed_short_names(corpus_dir: Path) -> frozenset[str]:
     mathlib = corpus_dir / "mathlib_declarations.jsonl"
     pfr = corpus_dir / "pfr_declarations.jsonl"
     if not mathlib.exists() or not pfr.exists():
-        return set()
+        return frozenset()
     mathlib_short: set[str] = set()
     for d in read_corpus(mathlib):
         mathlib_short.add(d.name)
     pfr_short: set[str] = set()
     for d in read_corpus(pfr):
         pfr_short.add(d.name)
-    return mathlib_short & pfr_short
+    return frozenset(mathlib_short & pfr_short)
 
 
-def _classify(step: ProofStep, shadowed: set[str]) -> Scenario:
-    if step.cited_source == "mathlib":
-        return "mathlib_only"
-    short = step.cited_name.split(".")[-1]
-    if short in shadowed:
-        return "mixed"
-    return "local_only"
+def _build_classifier(corpus_dir: Path) -> _Classifier:
+    """Prefer the v2 union corpus when available; fall back to v1 layout."""
+    v2_dir = corpus_dir / "v2"
+    if v2_dir.is_dir() and any(v2_dir.glob("*.jsonl")):
+
+        def _iter_v2() -> object:
+            for p in sorted(v2_dir.glob("*.jsonl")):
+                yield from read_corpus(p)
+
+        index = build_scenario_index(_iter_v2())  # type: ignore[arg-type]
+        logger.info(
+            "scenarios: built v2 index "
+            "(mathlib contexts=%d, project locals=%d)",
+            len(index.mathlib_qnames),
+            len(index.local_qnames),
+        )
+        return _Classifier(v2_index=index, legacy_shadowed=frozenset())
+    return _Classifier(
+        v2_index=None,
+        legacy_shadowed=_legacy_shadowed_short_names(corpus_dir),
+    )
 
 
 def _generate_one(
     step: ProofStep,
     *,
-    shadowed: set[str],
+    classifier: _Classifier,
     client: LLMClient,
     model: str,
     seed: int,
     temperature: float,
 ) -> tuple[GeneratedQuery, bool, int, int]:
-    scenario = _classify(step, shadowed)
+    scenario = classifier.classify(step)
     req = ChatRequest(
         model=model,
         system=SYSTEM_PROMPT,
@@ -139,7 +213,7 @@ def generate_queries(
     if client is None:
         client = LLMClient(cache_dir=cache_dir)
 
-    shadowed = _shadowed_short_names(corpus_dir)
+    classifier = _build_classifier(corpus_dir)
     existing_ids: set[str] = set()
     for raw in read_jsonl_raw(out_path):
         sid = raw.get("proof_step_id")
@@ -166,7 +240,7 @@ def generate_queries(
             for step in pending:
                 row, cached, ptok, ctok = _generate_one(
                     step,
-                    shadowed=shadowed,
+                    classifier=classifier,
                     client=client,
                     model=model,
                     seed=seed,
@@ -181,7 +255,7 @@ def generate_queries(
                     pool.submit(
                         _generate_one,
                         step,
-                        shadowed=shadowed,
+                        classifier=classifier,
                         client=client,
                         model=model,
                         seed=seed,

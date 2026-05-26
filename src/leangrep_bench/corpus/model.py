@@ -23,6 +23,7 @@ class NormalizedDeclaration(BaseModel):
     line: int
     has_complete_info: bool
     missing_fields: list[str]
+    visible_in: list[tuple[str, str]] = []
 
     model_config = ConfigDict(extra="ignore")
 

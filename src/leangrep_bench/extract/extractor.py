@@ -1,7 +1,11 @@
 """Convert LeanDojo ``TacticTrace`` records into ``ProofStep`` rows.
 
-The producer is `data/dojo_trace/`; the consumer is the rest of the
-benchmark pipeline (generation, verification, eval).
+The producer is ``data/dojo_trace_<project>/``; the consumer is the rest of
+the benchmark pipeline (generation, verification, eval). v2 (Phase 15) added
+multi-project support: the extractor stamps each ``ProofStep`` with the
+``project`` name and the ``mathlib_sha`` pinned by that project so the
+downstream visibility filter can find the right corpus context without
+re-reading the manifest.
 """
 
 from __future__ import annotations
@@ -67,6 +71,8 @@ def _convert(
     next_id: list[int],
     prior: deque[str],
     summary: ExtractionSummary,
+    project: str,
+    mathlib_sha: str | None,
 ) -> ProofStep | None:
     kind = _tactic_kind(trace.tactic)
     if kind is None:
@@ -78,7 +84,13 @@ def _convert(
         summary.skipped[head.skip_reason or "no_head"] += 1
         return None
 
-    entry = index.lookup_qualified(head.premise.full_name)
+    # LeanDojo-v2 frequently hands back bare premise names (``log_nonneg``
+    # rather than ``Real.log_nonneg``). ``CorpusIndex.resolve`` reconstructs
+    # the qualified form using the enclosing decl's namespace and a unique
+    # short-name fallback — see its docstring for the precedence rules.
+    entry = index.resolve(
+        head.premise.full_name, enclosing_decl=trace.enclosing_decl
+    )
     if entry is None:
         summary.skipped["unresolved_to_corpus"] += 1
         return None
@@ -109,7 +121,7 @@ def _convert(
         enclosing_entry.signature if enclosing_entry is not None else None
     )
 
-    step_id = f"pfr_step_{next_id[0]:05d}"
+    step_id = f"{project}_step_{next_id[0]:05d}"
     next_id[0] += 1
 
     summary.kept += 1
@@ -130,6 +142,8 @@ def _convert(
         hypotheses=hypotheses,
         prior_tactics=list(prior),
         raw_tactic_line=trace.tactic,
+        project=project,
+        mathlib_sha=mathlib_sha,
     )
 
 
@@ -138,6 +152,8 @@ def _iter_steps(
     *,
     index: CorpusIndex,
     summary: ExtractionSummary,
+    project: str,
+    mathlib_sha: str | None,
 ) -> Iterator[ProofStep]:
     next_id = [0]
     prior: deque[str] = deque(maxlen=5)
@@ -157,6 +173,8 @@ def _iter_steps(
             next_id=next_id,
             prior=prior,
             summary=summary,
+            project=project,
+            mathlib_sha=mathlib_sha,
         )
         if step is not None:
             yield step
@@ -172,11 +190,26 @@ def extract_proof_steps(
     *,
     index: CorpusIndex,
     out_path: Path,
+    project: str = "pfr",
+    mathlib_sha: str | None = None,
 ) -> ExtractionSummary:
+    """Convert a LeanDojo trace into project-tagged ``ProofStep`` rows.
+
+    ``project`` and ``mathlib_sha`` end up on every emitted row so the
+    Phase 14 scenario classifier and Phase 13 visibility filter can be
+    applied downstream without re-reading the manifest. ``project``
+    defaults to ``"pfr"`` for back-compat with v1 callers.
+    """
     summary = ExtractionSummary()
     write_jsonl(
         out_path,
-        _iter_steps(iter_traces(trace_path), index=index, summary=summary),
+        _iter_steps(
+            iter_traces(trace_path),
+            index=index,
+            summary=summary,
+            project=project,
+            mathlib_sha=mathlib_sha,
+        ),
     )
     return summary
 

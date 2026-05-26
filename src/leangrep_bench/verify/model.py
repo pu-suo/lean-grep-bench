@@ -8,7 +8,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 Scenario = Literal["local_only", "mathlib_only", "mixed"]
-Source = Literal["mathlib", "pfr"]
+# v2 broadens ``Source`` from the v1 enum ``"mathlib" | "pfr"`` to a free-form
+# string so it can hold ``"local:<project>"`` for any traced project. The
+# existing v1 PFR benchmark continues to validate (its rows say ``"mathlib"``
+# or ``"pfr"``).
+Source = str
 
 
 class BenchmarkContext(BaseModel):
@@ -46,6 +50,11 @@ class BenchmarkItem(BaseModel):
     context: BenchmarkContext
     provenance: Provenance
     generation: GenerationMeta
+    # v2 corpus-context fields. The eval runner uses these to apply the
+    # visibility filter over the union corpus. Optional on read so v1
+    # benchmark.jsonl files still parse; the v2 regen step populates them.
+    project: str | None = None
+    mathlib_sha: str | None = None
 
     model_config = ConfigDict(extra="ignore")
 

@@ -7,7 +7,40 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 logger = logging.getLogger(__name__)
+
+
+class ProjectEntry(BaseModel):
+    project_name: str
+    project_repo_url: str
+    project_sha: str
+    mathlib_sha: str
+    lean_toolchain: str
+    license: str
+    decl_count: int
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BuildManifestV2(BaseModel):
+    schema_version: str
+    built_at: str
+    projects: list[ProjectEntry]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def read_manifest_v2(path: Path) -> BuildManifestV2:
+    """Load and validate a v2 build manifest."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    manifest = BuildManifestV2.model_validate(data)
+    if manifest.schema_version != "v2":
+        raise ValueError(
+            f"expected schema_version='v2', got {manifest.schema_version!r}"
+        )
+    return manifest
 
 
 def _git(args: list[str], cwd: Path) -> str:
@@ -41,6 +74,12 @@ def write_manifest(
     If the manifest already exists, the new entry is merged into it so calling
     ``build-mathlib`` and ``build-pfr`` separately still produces a single
     manifest with both SHAs.
+
+    No-op when the existing file is a v2 manifest. v2 carries multi-project
+    structure that the v1 single-mathlib + single-pfr flat layout cannot
+    represent; injecting v1-shaped keys breaks the v2 ``extra="forbid"``
+    schema. v2 manifests are edited by the operator (or by ``corpus
+    build-project``-style commands), not by ``build-mathlib``.
     """
     manifest: dict[str, Any] = {}
     if out_path.exists():
@@ -48,6 +87,13 @@ def write_manifest(
             manifest = json.loads(out_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             manifest = {}
+        if manifest.get("schema_version") == "v2":
+            logger.info(
+                "skipping legacy manifest write: %s is a v2 manifest "
+                "(edit it directly or via build-project)",
+                out_path,
+            )
+            return manifest
 
     manifest["built_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     if extra:
