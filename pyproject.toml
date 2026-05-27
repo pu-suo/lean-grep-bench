@@ -26,12 +26,14 @@ dev = [
     "pytest>=8",
     "pytest-cov>=5",
     "ruff>=0.6",
-    "pyright>=1.1.380",
+    # Upper bound caps the version we've verified the project against. Lift
+    # after re-running pyright locally against the next minor.
+    "pyright>=1.1.380,<1.2",
 ]
 # Installed only on the Linux trace box. Never imported by the in-package code;
-# see specs/phase_08_remote_runbook.md.
+# see specs/phase_15_remote_runbook.md.
 dojo = [
-    "lean-dojo",
+    "lean-dojo-v2",
 ]
 
 [project.scripts]

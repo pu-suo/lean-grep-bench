@@ -1,3 +1,10 @@
+# Typer wires every CLI parameter through ``typer.Option(...)``, whose return
+# type is ``Annotated[Any | None, ...]``. Newer pyright releases flag this as
+# "partially unknown" under strict mode, which is the policy for the rest of
+# src/. This file is pure CLI dispatch — strict-mode benefits are minimal and
+# the noise is large. Drop to standard mode here only.
+# pyright: standard
+
 import logging
 from pathlib import Path
 

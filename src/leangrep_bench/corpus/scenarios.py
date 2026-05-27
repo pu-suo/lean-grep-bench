@@ -49,9 +49,17 @@ class CitedLemmaNotInCorpus(Exception):
 class ScenarioIndex:
     """Cached views of the union corpus needed by the classifier."""
 
-    mathlib_qnames: dict[str, frozenset[str]] = field(default_factory=dict)
-    mathlib_short_names: dict[str, frozenset[str]] = field(default_factory=dict)
-    local_qnames: dict[str, frozenset[str]] = field(default_factory=dict)
+    # ``field(default_factory=dict)`` infers ``dict[Unknown, Unknown]`` under
+    # strict pyright. Use typed lambdas so the field annotations are honored.
+    mathlib_qnames: dict[str, frozenset[str]] = field(
+        default_factory=lambda: {}
+    )
+    mathlib_short_names: dict[str, frozenset[str]] = field(
+        default_factory=lambda: {}
+    )
+    local_qnames: dict[str, frozenset[str]] = field(
+        default_factory=lambda: {}
+    )
 
 
 def build_scenario_index(corpus: Iterable[NormalizedDeclaration]) -> ScenarioIndex:
